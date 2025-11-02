@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>排班表生成器</title>
+    <!-- 核心库 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- 日期处理 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.11.10/dayjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.11.10/plugin/customParseFormat.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/solarlunar@1.0.8/solarlunar.min.js"></script>
+    <!-- 自定义模块 -->
+    <script src="js/lunarCalendar.js"></script>
+    <script src="js/replaceRules.js"></script>
+    <script src="js/excelProcessor.js"></script>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 4px;
+            background-color: #fafafa;
+        }
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background-color: #45a049;
+        }
+        .input-group {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        input, select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        /* 排班表样式 */
+        .schedule-table {
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        .schedule-table table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+        .schedule-table th {
+            background-color: #f7f7f7;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid #e0e0e0;
+        }
+        .schedule-table td {
+            border: 1px solid #e0e0e0;
+            padding: 8px;
+            vertical-align: top;
+            height: 100px;
+            width: 14.28%;
+        }
+        .date {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .lunar {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .schedule {
+            font-size: 0.95em;
+        }
+        .schedule-line {
+            margin-top: 4px;
+        }
+        .schedule-line:first-child {
+            margin-top: 0;
+        }
+        .schedule-time {
+            color: #808080;
+            margin-left: 6px;
+        }
+        .holiday-name {
+            color: #ff6347;
+            font-size: 0.9em;
+            margin-left: 4px;
+        }
+        
+        /* 特殊班次样式 */
+        .night-shift {
+            background-color: #dde6f2;
+        }
+        .rest-day {
+            background-color: #a6ebc3;
+        }
+        .holiday {
+            color: #ff6347;
+        }
+
+        .remarks {
+            margin-top: 20px;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background-color: #fafafa;
+            color: #555;
+        }
+        .remarks ul {
+            margin: 8px 0 0;
+            padding-left: 18px;
+        }
+        .remarks li {
+            margin: 4px 0;
+        }
+
+        /* 加载提示 */
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 4px;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            .schedule-table td {
+                padding: 4px;
+                height: 80px;
+                font-size: 0.9em;
+            }
+            .input-group {
+                flex-direction: column;
+                align-items: center;
+            }
+            input, select {
+                width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <h1>排班表生成器</h1>
+        
+        <!-- 文件上传区域 -->
+        <div class="upload-area" 
+             @drop.prevent="handleDrop"
+             @dragover.prevent="onDragOver">
+            <input 
+                type="file" 
+                multiple
+                @change="handleFileSelect" 
+                accept=".xlsx,.xls"
+                style="display: none" 
+                ref="fileInput"
+            >
+            <button class="btn" @click="$refs.fileInput.click()">
+                选择Excel文件
+            </button>
+            <p>或将文件拖到此处</p>
+            <p v-if="selectedFiles.length">已选择: {{ selectedFileNames }}</p>
+        </div>
+
+        <!-- 基本设置 -->
+        <div class="input-group">
+            <input 
+                v-model="name" 
+                placeholder="请输入姓名"
+            >
+            <select v-model="selectedMonth">
+                <option v-for="m in 12" :key="m" :value="m">{{m}}月</option>
+            </select>
+            <select v-model="selectedYear">
+                <option v-for="y in yearOptions" :key="y" :value="y">{{y}}</option>
+            </select>
+            <button 
+                class="btn"
+                @click="generateSchedule"
+                :disabled="!selectedFiles.length"
+            >
+                生成排班表
+            </button>
+        </div>
+
+        <!-- 排班表显示 -->
+        <div v-if="Object.keys(schedule).length > 0" class="schedule-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th v-for="day in ['一','二','三','四','五','六','日']" :key="day">
+                            周{{day}}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="(week, weekIndex) in generateCalendarData()" :key="weekIndex">
+                        <td v-for="(day, dayIndex) in week" :key="dayIndex"
+                            :class="{'holiday': day?.holiday}"
+                            :style="getCellStyle(day)"
+                        >
+                            <template v-if="day">
+                                <div class="date">
+                                    {{day.date}}
+                                    <span v-if="day.holiday" class="holiday-name">
+                                        {{day.holiday}}
+                                    </span>
+                                </div>
+                                <div class="lunar">{{day.lunar}}</div>
+                                <div class="schedule">
+                                    <div 
+                                        v-for="(line, lineIndex) in formatScheduleLines(day.scheduleInfo.content)"
+                                        :key="lineIndex"
+                                        class="schedule-line"
+                                    >
+                                        <span>{{ line.shift }}</span>
+                                        <span v-if="line.time" class="schedule-time">{{ line.time }}</span>
+                                    </div>
+                                </div>
+                            </template>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="remarks" v-if="remarks.length">
+            <strong>备注：</strong>
+            <ul>
+                <li v-for="(item, index) in remarks" :key="index">{{ item }}</li>
+            </ul>
+        </div>
+
+        <!-- 导出按钮 -->
+        <div class="actions" v-if="Object.keys(schedule).length > 0">
+            <button class="btn" @click="exportImage">
+                导出为图片
+            </button>
+        </div>
+
+        <!-- 加载提示 -->
+        <div v-if="loading" class="loading">
+            处理中...
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        if (window.dayjs_plugin_customParseFormat) {
+            dayjs.extend(window.dayjs_plugin_customParseFormat);
+        }
+
+        const COLOR_SCHEMES = {
+            "方案1": {
+                COLOR_REST: "#A6EBC3",
+                COLOR_NIGHT: "#DDE6F2",
+                FONT_COLOR_HOLIDAY: "#FF6347"
+            },
+            "方案2": {
+                COLOR_REST: "#27AF27",
+                COLOR_NIGHT: "#629DD8",
+                FONT_COLOR_HOLIDAY: "#FF4500"
+            },
+            "方案3": {
+                COLOR_REST: "#FFECB3",
+                COLOR_NIGHT: "#FFCDD2",
+                FONT_COLOR_HOLIDAY: "#D32F2F"
+            },
+            "方案4": {
+                COLOR_REST: "#80CBC4",
+                COLOR_NIGHT: "#546E7A",
+                FONT_COLOR_HOLIDAY: "#FF7043"
+            }
+        };
+
+        const MONTH_COLOR_MAP = {
+            1: "方案1",
+            2: "方案2",
+            3: "方案3",
+            4: "方案4",
+            5: "方案1",
+            6: "方案2",
+            7: "方案3",
+            8: "方案4",
+            9: "方案1",
+            10: "方案2",
+            11: "方案3",
+            12: "方案4"
+        };
+
+        createApp({
+            setup() {
+                const selectedFiles = ref([]);
+                const name = ref('');
+                const selectedMonth = ref(new Date().getMonth() + 1);
+                const selectedYear = ref(new Date().getFullYear());
+                const fileInput = ref(null);
+                const schedule = ref({});
+                const remarks = ref([]);
+                const loading = ref(false);
+
+                const yearOptions = computed(() => {
+                    const currentYear = new Date().getFullYear();
+                    return Array.from({ length: 11 }, (_, index) => currentYear - 5 + index);
+                });
+
+                const selectedFileNames = computed(() => selectedFiles.value.map(file => file.name).join('、'));
+
+                const currentScheme = computed(() => {
+                    const schemeName = MONTH_COLOR_MAP[selectedMonth.value] || "方案1";
+                    return COLOR_SCHEMES[schemeName];
+                });
+
+                const handleFileSelect = (event) => {
+                    const files = event?.target?.files ?? event?.dataTransfer?.files;
+                    if (!files) {
+                        return;
+                    }
+                    const validFiles = Array.from(files).filter(file => /\.xls[x]?$/i.test(file.name));
+                    if (!validFiles.length) {
+                        alert('请选择 Excel 文件');
+                        return;
+                    }
+                    selectedFiles.value = validFiles;
+                    if (event?.target) {
+                        event.target.value = '';
+                    }
+                };
+
+                const handleDrop = (event) => {
+                    handleFileSelect(event);
+                };
+
+                const onDragOver = (event) => {
+                    event.preventDefault();
+                };
+
+                const mergeSchedule = (data) => {
+                    console.log('=== 开始合并数据 ===');
+                    console.log('合并前的字典条目数:', Object.keys(schedule.value).length);
+                    console.log('合并前的字典:', schedule.value);
+                    console.log('待合并的数据:', data);
+                    
+                    const next = { ...schedule.value };
+                    const mergedDates = [];
+                    const newDates = [];
+                    
+                    Object.entries(data).forEach(([dateStr, info]) => {
+                        if (next[dateStr]) {
+                            const oldContent = next[dateStr].content;
+                            next[dateStr] = {
+                                ...next[dateStr],
+                                content: `${next[dateStr].content} | ${info.content}`
+                            };
+                            mergedDates.push({
+                                date: dateStr,
+                                old: oldContent,
+                                new: next[dateStr].content
+                            });
+                        } else {
+                            next[dateStr] = { ...info };
+                            newDates.push({
+                                date: dateStr,
+                                content: info.content
+                            });
+                        }
+                    });
+                    
+                    schedule.value = next;
+                    
+                    console.log('合并后的字典条目数:', Object.keys(schedule.value).length);
+                    console.log('合并后的字典:', schedule.value);
+                    console.log('新添加的日期:', newDates);
+                    console.log('合并的日期（已有内容追加）:', mergedDates);
+                    console.log('==================');
+                };
+
+                const generateSchedule = async () => {
+                    if (!selectedFiles.value.length) {
+                        alert('请先选择 Excel 文件');
+                        return;
+                    }
+                    if (!name.value.trim()) {
+                        alert('请输入姓名');
+                        return;
+                    }
+
+                    loading.value = true;
+                    schedule.value = {};
+                    remarks.value = [];
+
+                    try {
+                        for (const file of selectedFiles.value) {
+                            const { scheduleData, remarks: fileRemarks } = await ExcelProcessor.processFile(file, {
+                                targetName: name.value.trim(),
+                                year: selectedYear.value,
+                                month: selectedMonth.value
+                            });
+                            mergeSchedule(scheduleData);
+                            if (fileRemarks?.length) {
+                                remarks.value = remarks.value.concat(fileRemarks);
+                            }
+                        }
+                        
+                        // 打印最终合并后的字典（用于调试）
+                        console.log('=== 最终合并后的排班字典 ===');
+                        console.log('总条目数:', Object.keys(schedule.value).length);
+                        console.log('完整字典:', schedule.value);
+                        
+                        // 按日期排序打印
+                        const finalSorted = Object.entries(schedule.value).sort((a, b) => a[0].localeCompare(b[0]));
+                        console.log('按日期排序的最终条目:');
+                        finalSorted.forEach(([dateStr, info]) => {
+                            console.log(`  ${dateStr}: ${info.content || '(空)'}`);
+                        });
+                        console.log('============================');
+                    } catch (error) {
+                        alert(`排班表生成失败：${error.message || error}`);
+                        schedule.value = {};
+                        remarks.value = [];
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const generateCalendarData = () => {
+                    const year = selectedYear.value;
+                    const month = selectedMonth.value;
+                    console.log('=== 开始映射排班数据到日历 ===');
+                    console.log('年月:', `${year}年${month}月`);
+                    console.log('当前排班字典:', schedule.value);
+                    console.log('字典中的所有日期:', Object.keys(schedule.value).sort());
+                    
+                    const firstDay = dayjs(`${year}-${String(month).padStart(2, '0')}-01`, 'YYYY-MM-DD', true);
+                    if (!firstDay.isValid()) {
+                        console.log('日期无效，返回空数组');
+                        return [];
+                    }
+
+                    const daysInMonth = firstDay.daysInMonth();
+                    const weeks = [];
+                    let currentWeek = [];
+                    
+                    const mappingStats = {
+                        total: 0,
+                        found: 0,
+                        notFound: [],
+                        foundDates: []
+                    };
+
+                    const mondayBasedIndex = (firstDay.day() + 6) % 7;
+                    for (let i = 0; i < mondayBasedIndex; i += 1) {
+                        currentWeek.push(null);
+                    }
+
+                    for (let day = 1; day <= daysInMonth; day += 1) {
+                        const date = dayjs(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, 'YYYY-MM-DD', true);
+                        const dateStr = date.format('YYYY-MM-DD');
+                        
+                        mappingStats.total++;
+                        const scheduleData = schedule.value[dateStr];
+                        const hasSchedule = scheduleData && scheduleData.content;
+                        
+                        if (hasSchedule) {
+                            mappingStats.found++;
+                            mappingStats.foundDates.push(dateStr);
+                            if (day <= 12) {
+                                console.log(`  [1-12号] ${dateStr} (${day}号): 找到排班数据`, scheduleData);
+                            }
+                        } else {
+                            mappingStats.notFound.push({ date: dateStr, day });
+                            if (day <= 12) {
+                                console.log(`  [1-12号] ${dateStr} (${day}号): 未找到排班数据`, scheduleData || '(字典中不存在)');
+                            }
+                        }
+
+                        currentWeek.push({
+                            date: day,
+                            scheduleInfo: scheduleData || {},
+                            lunar: LunarCalendar.getLunarDate(date.toDate()),
+                            holiday: LunarCalendar.getHoliday(dateStr)
+                        });
+
+                        if (currentWeek.length === 7) {
+                            weeks.push(currentWeek);
+                            currentWeek = [];
+                        }
+                    }
+
+                    if (currentWeek.length > 0) {
+                        while (currentWeek.length < 7) {
+                            currentWeek.push(null);
+                        }
+                        weeks.push(currentWeek);
+                    }
+
+                    console.log('=== 映射统计 ===');
+                    console.log('总日期数:', mappingStats.total);
+                    console.log('找到排班数据的日期数:', mappingStats.found);
+                    console.log('未找到排班数据的日期数:', mappingStats.notFound.length);
+                    console.log('找到排班数据的日期列表:', mappingStats.foundDates.sort());
+                    console.log('未找到排班数据的日期列表:', mappingStats.notFound.map(item => `${item.date} (${item.day}号)`));
+                    console.log('==================');
+
+                    return weeks;
+                };
+
+                const formatScheduleLines = (content) => {
+                    if (!content) {
+                        return [];
+                    }
+
+                    return content.split(' | ').map(item => {
+                        const [shift, time] = item.split(/\s+/, 2);
+                        if (!time || /休|工休/.test(item)) {
+                            return { shift: item, time: '' };
+                        }
+                        return { shift, time };
+                    });
+                };
+
+                const getCellStyle = (day) => {
+                    if (!day || !day.scheduleInfo || !day.scheduleInfo.content) {
+                        return {};
+                    }
+                    const content = day.scheduleInfo.content;
+                    if (/休息|工休/.test(content)) {
+                        return { backgroundColor: currentScheme.value.COLOR_REST };
+                    }
+                    if (/夜|21\.30~7\.30/.test(content)) {
+                        return { backgroundColor: currentScheme.value.COLOR_NIGHT };
+                    }
+                    return {};
+                };
+
+                const exportImage = async () => {
+                    const element = document.querySelector('.schedule-table');
+                    if (!element) {
+                        return;
+                    }
+                    try {
+                        const canvas = await html2canvas(element, { backgroundColor: '#ffffff' });
+                        const link = document.createElement('a');
+                        link.download = `${name.value}的${selectedMonth.value}月排班表.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                    } catch (error) {
+                        alert(`导出失败：${error.message || error}`);
+                    }
+                };
+
+                onMounted(() => {
+                    ReplaceRules.loadRules();
+                    const savedName = localStorage.getItem('scheduleName');
+                    if (savedName) {
+                        name.value = savedName;
+                    }
+                });
+
+                watch(name, (newValue) => {
+                    localStorage.setItem('scheduleName', newValue);
+                });
+
+                return {
+                    selectedFiles,
+                    selectedFileNames,
+                    name,
+                    selectedMonth,
+                    selectedYear,
+                    yearOptions,
+                    fileInput,
+                    schedule,
+                    remarks,
+                    loading,
+                    handleFileSelect,
+                    handleDrop,
+                    onDragOver,
+                    generateSchedule,
+                    generateCalendarData,
+                    exportImage,
+                    getCellStyle,
+                    formatScheduleLines
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
