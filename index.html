@@ -394,7 +394,10 @@
         <!-- 导出按钮 -->
         <div class="actions" v-if="Object.keys(schedule).length > 0">
             <button class="btn" @click="exportImage">
-                导出为图片
+                导出为图片(9:16)
+            </button>
+            <button class="btn" @click="exportImage169">
+                导出为图片(16:9)
             </button>
         </div>
 
@@ -694,6 +697,28 @@
                     return {};
                 };
 
+                const createPaddedCanvas = (sourceCanvas, aspectW, aspectH, paddingColor) => {
+                    const originalWidth = sourceCanvas.width;
+                    const originalHeight = sourceCanvas.height;
+                    // 计算满足：targetW/targetH = aspectW/aspectH，且 targetW>=originalWidth 且 targetH>=originalHeight
+                    let targetWidth = Math.max(originalWidth, Math.ceil((originalHeight * aspectW) / aspectH));
+                    let targetHeight = Math.ceil((targetWidth * aspectH) / aspectW);
+                    if (targetHeight < originalHeight) {
+                        targetHeight = originalHeight;
+                        targetWidth = Math.ceil((targetHeight * aspectW) / aspectH);
+                    }
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = targetWidth;
+                    finalCanvas.height = targetHeight;
+                    const ctx = finalCanvas.getContext('2d');
+                    ctx.fillStyle = paddingColor || '#f5f5f5';
+                    ctx.fillRect(0, 0, targetWidth, targetHeight);
+                    const offsetX = Math.round((targetWidth - originalWidth) / 2);
+                    const offsetY = Math.round((targetHeight - originalHeight) / 2);
+                    ctx.drawImage(sourceCanvas, offsetX, offsetY);
+                    return finalCanvas;
+                };
+
                 const exportImage = async () => {
                     const element = document.querySelector('.schedule-table');
                     if (!element) {
@@ -701,9 +726,36 @@
                     }
                     try {
                         const canvas = await html2canvas(element, { backgroundColor: '#ffffff' });
+                        const paddingColor =
+                            getComputedStyle(element)?.backgroundColor ||
+                            getComputedStyle(document.body)?.backgroundColor ||
+                            '#f5f5f5';
+                        const finalCanvas = createPaddedCanvas(canvas, 9, 16, paddingColor);
+
                         const link = document.createElement('a');
-                        link.download = `${name.value}的${selectedMonth.value}月排班表.png`;
-                        link.href = canvas.toDataURL('image/png');
+                        link.download = `${name.value}的${selectedMonth.value}月排班表_9比16竖版.png`;
+                        link.href = finalCanvas.toDataURL('image/png');
+                        link.click();
+                    } catch (error) {
+                        alert(`导出失败：${error.message || error}`);
+                    }
+                };
+
+                const exportImage169 = async () => {
+                    const element = document.querySelector('.schedule-table');
+                    if (!element) {
+                        return;
+                    }
+                    try {
+                        const canvas = await html2canvas(element, { backgroundColor: '#ffffff' });
+                        const paddingColor =
+                            getComputedStyle(element)?.backgroundColor ||
+                            getComputedStyle(document.body)?.backgroundColor ||
+                            '#f5f5f5';
+                        const finalCanvas = createPaddedCanvas(canvas, 16, 9, paddingColor);
+                        const link = document.createElement('a');
+                        link.download = `${name.value}的${selectedMonth.value}月排班表_16比9横版.png`;
+                        link.href = finalCanvas.toDataURL('image/png');
                         link.click();
                     } catch (error) {
                         alert(`导出失败：${error.message || error}`);
@@ -739,6 +791,7 @@
                     generateSchedule,
                     generateCalendarData,
                     exportImage,
+                    exportImage169,
                     getCellStyle,
                     formatScheduleLines
                 };
